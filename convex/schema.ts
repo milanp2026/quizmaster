@@ -14,14 +14,17 @@ export default defineSchema({
     name: v.string(),
     score: v.number(),
     joinedAt: v.number(),
-  }).index("by_gameId", ["gameId"]),
+    active: v.optional(v.boolean()),
+  })
+    .index("by_gameId", ["gameId"])
+    .index("by_gameId_score", ["gameId", "score"]),
 
   gameState: defineTable({
     gameId: v.id("games"),
     phase: v.string(),
     currentQuestionId: v.optional(v.id("questions")),
-    scoreboardVisible: v.boolean(),
-    answersOpen: v.boolean(),
+    scoreboardVisible: v.optional(v.boolean()),
+    answersOpen: v.optional(v.boolean()),
   }).index("by_gameId", ["gameId"]),
 
   questions: defineTable({
@@ -50,6 +53,7 @@ export default defineSchema({
     playerName: v.string(),
     value: v.string(),
     submittedAt: v.number(),
+    reactionMs: v.optional(v.number()),
     isCorrect: v.optional(v.boolean()),
     pointsAwarded: v.optional(v.number()),
     scoredAt: v.optional(v.number()),

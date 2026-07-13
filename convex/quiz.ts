@@ -10,6 +10,14 @@ function normalizePlayerName(name: string) {
   return name.trim().replace(/\s+/g, " ");
 }
 
+function isPlayerActive(player: { active?: boolean }) {
+  return player.active !== false;
+}
+
+function speedBonusForRank(rank: number) {
+  return [5, 3, 2][rank] ?? 0;
+}
+
 export const createGame = mutation({
   args: {
     masterPin: v.string(),
@@ -78,16 +86,14 @@ export const joinGame = mutation({
       throw new Error("Geen game gevonden met deze code.");
     }
 
-    if (game.status !== "lobby") {
-      throw new Error("Deze game staat niet meer open voor nieuwe spelers.");
-    }
-
     const players = await ctx.db
       .query("players")
       .withIndex("by_gameId", (q) => q.eq("gameId", game._id))
       .collect();
 
-    const usedNames = new Set(players.map((player) => player.name.toLowerCase()));
+    const usedNames = new Set(
+      players.filter(isPlayerActive).map((player) => player.name.toLowerCase()),
+    );
     let playerName = baseName;
     let number = 2;
 
@@ -101,6 +107,7 @@ export const joinGame = mutation({
       name: playerName,
       score: 0,
       joinedAt: Date.now(),
+      active: true,
     });
 
     return {
@@ -125,7 +132,8 @@ export const getPlayer = query({
     playerId: v.id("players"),
   },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.playerId);
+    const player = await ctx.db.get(args.playerId);
+    return player && isPlayerActive(player) ? player : null;
   },
 });
 
@@ -149,7 +157,64 @@ export const listPlayers = query({
     return await ctx.db
       .query("players")
       .withIndex("by_gameId", (q) => q.eq("gameId", args.gameId))
+      .filter((q) => q.neq(q.field("active"), false))
       .collect();
+  },
+});
+
+export const listTopPlayers = query({
+  args: {
+    gameId: v.id("games"),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = Math.min(Math.max(args.limit ?? 10, 1), 10);
+    const players = await ctx.db
+      .query("players")
+      .withIndex("by_gameId_score", (q) => q.eq("gameId", args.gameId))
+      .order("desc")
+      .collect();
+
+    return players.filter(isPlayerActive).slice(0, limit);
+  },
+});
+
+export const renamePlayer = mutation({
+  args: {
+    playerId: v.id("players"),
+    name: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const player = await ctx.db.get(args.playerId);
+    const name = normalizePlayerName(args.name);
+
+    if (!player || !isPlayerActive(player)) {
+      throw new Error("Speler niet gevonden.");
+    }
+
+    if (name.length < 2 || name.length > 24) {
+      throw new Error("Gebruik een naam van 2 tot 24 tekens.");
+    }
+
+    await ctx.db.patch(args.playerId, { name });
+  },
+});
+
+export const removePlayer = mutation({
+  args: {
+    playerId: v.id("players"),
+  },
+  handler: async (ctx, args) => {
+    const player = await ctx.db.get(args.playerId);
+
+    if (!player) {
+      throw new Error("Speler niet gevonden.");
+    }
+
+    await ctx.db.patch(args.playerId, {
+      active: false,
+      name: `Verwijderd ${args.playerId.slice(-4)}`,
+    });
   },
 });
 
@@ -361,7 +426,7 @@ export const submitAnswer = mutation({
       throw new Error("Deze vraag is niet live.");
     }
 
-    if (!player || player.gameId !== args.gameId) {
+    if (!player || player.gameId !== args.gameId || !isPlayerActive(player)) {
       throw new Error("Speler niet gevonden.");
     }
 
@@ -382,13 +447,16 @@ export const submitAnswer = mutation({
       throw new Error("Je hebt deze vraag al beantwoord.");
     }
 
+    const submittedAt = Date.now();
+
     return await ctx.db.insert("answers", {
       gameId: args.gameId,
       questionId: args.questionId,
       playerId: args.playerId,
       playerName: player.name,
       value,
-      submittedAt: Date.now(),
+      submittedAt,
+      reactionMs: Math.max(0, submittedAt - (question.liveAt ?? submittedAt)),
     });
   },
 });
@@ -457,7 +525,23 @@ export const scoreAnswer = mutation({
     }
 
     const previousPoints = answer.pointsAwarded ?? 0;
-    const nextPoints = args.isCorrect ? args.pointsAwarded : 0;
+    let nextPoints = args.isCorrect ? args.pointsAwarded : 0;
+
+    if (args.isCorrect) {
+      const question = await ctx.db.get(answer.questionId);
+
+      if (question?.speedBonus) {
+        const answers = await ctx.db
+          .query("answers")
+          .withIndex("by_questionId", (q) => q.eq("questionId", answer.questionId))
+          .collect();
+        const approvedAnswers = answers
+          .filter((currentAnswer) => currentAnswer.isCorrect === true || currentAnswer._id === args.answerId)
+          .sort((left, right) => left.submittedAt - right.submittedAt);
+        const rank = approvedAnswers.findIndex((currentAnswer) => currentAnswer._id === args.answerId);
+        nextPoints += speedBonusForRank(rank);
+      }
+    }
 
     await ctx.db.patch(answer.playerId, {
       score: player.score - previousPoints + nextPoints,

@@ -1,10 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation } from "convex/react";
 import { api } from "../../../convex/_generated/api";
+import { Icon, InfoCard, PageHeader, PageShell, PinInput, StatusBadge } from "@/components/quiz-ui";
 
 export default function CreateGamePage() {
   const router = useRouter();
@@ -31,53 +31,52 @@ export default function CreateGamePage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f7f4ef] px-5 py-6 text-[#1f2933]">
-      <section className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-sm flex-col justify-between gap-8">
-        <div className="space-y-6">
-          <Link className="text-sm font-semibold text-[#256f62]" href="/">
-            Terug naar home
-          </Link>
+    <PageShell>
+      <div className="space-y-8">
+        <PageHeader
+          eyebrow="Quizmaster"
+          right={<StatusBadge tone="yellow">Help</StatusBadge>}
+          subtitle="Stel een pincode in zodat alleen jij als quizmaster deze game kunt beheren."
+          title="Maak een nieuwe game"
+        />
 
-          <div className="space-y-3">
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#2f7d6d]">
-              Quizmaster
-            </p>
-            <h1 className="text-4xl font-bold leading-tight">Maak een nieuwe game.</h1>
-            <p className="text-lg text-[#52606d]">
-              Kies een pincode voor deze quizmaster-telefoon.
-            </p>
-          </div>
-        </div>
+        <form className="space-y-5" onSubmit={handleSubmit}>
+          <InfoCard>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.18em] text-[#6D3DF5]">
+                    Pincode
+                  </p>
+                  <p className="mt-1 text-lg font-black text-[#10233F]">4 cijfers</p>
+                </div>
+                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#F0EEFF] text-[#6D3DF5]">
+                  <Icon name="lock" />
+                </span>
+              </div>
 
-        <form className="space-y-4" onSubmit={handleSubmit}>
-          <label className="block space-y-2">
-            <span className="text-sm font-semibold text-[#52606d]">Quizmaster-pincode</span>
-            <input
-              className="h-16 w-full rounded-lg border-2 border-transparent bg-white px-5 text-center text-3xl font-bold tracking-[0.2em] shadow-sm outline-none transition focus:border-[#256f62]"
-              inputMode="numeric"
-              maxLength={4}
-              onChange={(event) => setMasterPin(event.target.value.replace(/\D/g, "").slice(0, 4))}
-              placeholder="1234"
-              type="password"
-              value={masterPin}
-            />
-          </label>
+              <PinInput onChange={setMasterPin} value={masterPin} />
+
+              <p className="text-sm font-bold text-[#667085]">Alleen voor jouw telefoon</p>
+            </div>
+          </InfoCard>
 
           {error ? (
-            <p className="rounded-lg bg-[#fff1f0] p-4 text-sm font-semibold text-[#b42318]">
+            <div className="rounded-[22px] bg-[#FFF1F0] p-4 text-sm font-bold text-[#B42318] ring-1 ring-[#FEE4E2]">
               {error}
-            </p>
+            </div>
           ) : null}
 
           <button
-            className="min-h-16 w-full rounded-lg bg-[#256f62] px-6 py-5 text-xl font-semibold text-white shadow-sm transition-colors hover:bg-[#1f5f54] focus:outline-none focus:ring-4 focus:ring-[#256f62]/25 disabled:cursor-not-allowed disabled:bg-[#9fb8b2]"
+            className="flex min-h-16 w-full items-center justify-center gap-3 rounded-[24px] bg-[#FFC928] px-6 text-lg font-black text-[#071426] shadow-[0_18px_38px_rgba(255,201,40,0.35)] transition hover:-translate-y-0.5 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
             disabled={isCreating}
             type="submit"
           >
-            {isCreating ? "Game maken..." : "Nieuwe game aanmaken"}
+            {isCreating ? "Game aanmaken..." : "Game aanmaken"}
+            <Icon name="arrow" />
           </button>
         </form>
-      </section>
-    </main>
+      </div>
+    </PageShell>
   );
 }
