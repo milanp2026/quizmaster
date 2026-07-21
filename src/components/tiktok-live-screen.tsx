@@ -1,19 +1,12 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import QRCode from "qrcode";
 import { useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { Icon } from "@/components/quiz-ui";
-
-type LiveMode = "display" | "control";
-
-type LiveScreenProps = {
-  game: Doc<"games">;
-  playerCount: number;
-  mode: LiveMode;
-};
 
 function secondsRemaining(game: Doc<"games">) {
   if (game.countdownStatus === "paused") {
@@ -28,9 +21,10 @@ function secondsRemaining(game: Doc<"games">) {
 }
 
 function formatTime(totalSeconds: number) {
-  const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, "0");
-  const seconds = Math.max(0, totalSeconds % 60).toString().padStart(2, "0");
-  return { minutes, seconds };
+  return {
+    minutes: Math.floor(totalSeconds / 60).toString().padStart(2, "0"),
+    seconds: Math.max(0, totalSeconds % 60).toString().padStart(2, "0"),
+  };
 }
 
 function publicAppUrl() {
@@ -38,299 +32,131 @@ function publicAppUrl() {
   if (configured) {
     return configured;
   }
-  if (typeof window !== "undefined") {
-    return window.location.origin;
-  }
-  return "";
+  return typeof window === "undefined" ? "" : window.location.origin;
 }
 
 function displayDomain(url: string) {
   try {
-    const host = new URL(url).host.replace(/^www\./, "");
-    return host || "quizmaster.live";
+    return new URL(url).host.replace(/^www\./, "") || "quizmaster.live";
   } catch {
     return "quizmaster.live";
   }
 }
 
-export function LiveLogo() {
-  return (
-    <section className="text-center">
-      <div className="mx-auto flex h-[8.5cqw] w-[8.5cqw] items-center justify-center rounded-full border-[0.45cqw] border-[#FF0A78] bg-[#030306] text-[5.7cqw] font-black text-white shadow-[0_0_3cqw_rgba(255,10,120,0.8)]">
-        ?
-      </div>
-      <h1 className="mt-[1.3cqw] text-[10.5cqw] font-black uppercase leading-[0.9] tracking-normal text-white drop-shadow-[0_0.7cqw_0_rgba(0,0,0,0.9)]">
-        Pubquiz
-      </h1>
-      <p className="-mt-[1cqw] rotate-[-5deg] text-[10.5cqw] font-black uppercase italic leading-none text-[#FF0A78] drop-shadow-[0_0_2.2cqw_rgba(255,10,120,0.75)]">
-        Live
-      </p>
-      <p className="mt-[1.2cqw] text-[1.7cqw] font-black uppercase tracking-[0.28em] text-white/82">
-        Speel mee - strijd - win
-      </p>
-    </section>
-  );
-}
-
-export function PlayerCountBadge({ count }: { count: number }) {
-  return (
-    <aside className="absolute right-[4.5cqw] top-[13.5cqw] rounded-[2.2cqw] border-[0.24cqw] border-[#FF0A78] bg-[#080810]/88 px-[2cqw] py-[1.5cqw] text-center shadow-[0_0_2.5cqw_rgba(255,10,120,0.55)]">
-      <div className="mx-auto flex h-[4.2cqw] w-[5.2cqw] items-center justify-center text-[#FF0A78]">
-        <Icon className="h-[3.5cqw] w-[3.5cqw]" name="players" />
-      </div>
-      <p className="mt-[0.4cqw] animate-[player-pop_0.35s_ease-out] text-[4cqw] font-black leading-none text-white">
-        {count}
-      </p>
-      <p className="mt-[0.6cqw] text-[1.4cqw] font-black uppercase leading-tight text-white/82">
-        Spelers
-        <br />
-        online
-      </p>
-    </aside>
-  );
-}
-
-export function JoinQrCard({
-  code,
-  qrDataUrl,
-  siteUrl,
+export function HostPinLogin({
+  gameId,
+  onAuthenticated,
 }: {
-  code: string;
-  qrDataUrl: string;
-  siteUrl: string;
+  gameId: Id<"games">;
+  onAuthenticated: (token: string) => void;
 }) {
-  const domain = displayDomain(siteUrl);
-  const [name, suffix] = domain.includes(".")
-    ? [domain.slice(0, domain.lastIndexOf(".")), domain.slice(domain.lastIndexOf("."))]
-    : [domain, ".live"];
-
-  return (
-    <section className="rounded-[4.5cqw] border-[0.28cqw] border-[#FF0A78] bg-[#080810]/86 px-[4cqw] py-[3.4cqw] shadow-[0_0_4.8cqw_rgba(255,10,120,0.38)]">
-      <div className="text-center">
-        <p className="text-[4.4cqw] font-black uppercase leading-none text-white">Scan & doe mee!</p>
-        <p className="mt-[0.8cqw] text-[2cqw] font-bold text-white/75">Scan de QR-code met je camera</p>
-      </div>
-
-      <div className="mx-auto mt-[3cqw] w-[43cqw] rounded-[3.2cqw] bg-[linear-gradient(135deg,#00E7F0,#FFFFFF_36%,#FF0A78)] p-[0.8cqw] shadow-[0_0_4cqw_rgba(0,231,240,0.58)]">
-        <div className="rounded-[2.2cqw] bg-white p-[2.2cqw]">
-          {qrDataUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img alt="QR-code om mee te doen" className="h-[37cqw] w-[37cqw]" src={qrDataUrl} />
-          ) : (
-            <div className="h-[37cqw] w-[37cqw] bg-white" />
-          )}
-        </div>
-      </div>
-
-      <p className="mt-[2.5cqw] text-center text-[1.6cqw] font-black uppercase text-white/75">Of ga naar</p>
-      <p className="text-center text-[5cqw] font-black lowercase leading-none drop-shadow-[0_0_2cqw_rgba(0,231,240,0.7)]">
-        <span className="text-[#00E7F0]">{name}</span>
-        <span className="text-[#FF0A78]">{suffix}</span>
-      </p>
-
-      <p className="mt-[2.3cqw] text-center text-[1.7cqw] font-black uppercase tracking-[0.18em] text-[#FF0A78]">
-        Quiz code
-      </p>
-      <div className="mx-auto mt-[0.6cqw] rounded-[2.4cqw] border-[0.22cqw] border-[#FF0A78] bg-black px-[3cqw] py-[1.2cqw] shadow-[-1.5cqw_0_3cqw_rgba(0,231,240,0.25),1.5cqw_0_3cqw_rgba(255,10,120,0.35)]">
-        <p className="text-center text-[5.4cqw] font-black uppercase tracking-[0.13em] text-white">
-          {code}
-        </p>
-      </div>
-    </section>
-  );
-}
-
-export function LiveCountdown({ game, remaining }: { game: Doc<"games">; remaining: number }) {
-  const { minutes, seconds } = formatTime(remaining);
-  const isUrgent = remaining <= 10 && game.countdownStatus === "running";
-  const launchNumber = remaining <= 3 && game.countdownStatus === "running" ? remaining : null;
-
-  return (
-    <section
-      className={`relative rounded-[3.2cqw] border-[0.28cqw] bg-[#080810]/92 px-[4cqw] py-[2.2cqw] text-center shadow-[0_0_4cqw_rgba(0,231,240,0.28)] ${
-        isUrgent ? "border-[#FF0A78] shadow-[0_0_5cqw_rgba(255,10,120,0.55)]" : "border-[#00E7F0]"
-      }`}
-    >
-      {launchNumber ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-[3cqw] bg-black/50 text-[20cqw] font-black text-[#FF0A78] opacity-90">
-          {launchNumber}
-        </div>
-      ) : null}
-      <p className="text-[1.7cqw] font-black uppercase tracking-[0.18em] text-white/78">
-        {game.countdownStatus === "paused"
-          ? "Afteller gepauzeerd"
-          : game.status === "live"
-            ? "De quiz is live"
-            : "De quiz start over"}
-      </p>
-      <div className={`mt-[0.7cqw] text-[9.4cqw] font-black leading-none text-white ${isUrgent ? "animate-pulse" : ""}`}>
-        {minutes} : {seconds}
-      </div>
-      <div className="mx-auto mt-[1cqw] grid max-w-[42cqw] grid-cols-2 gap-[4cqw]">
-        <p className="text-[1.7cqw] font-black uppercase tracking-[0.16em] text-[#00E7F0]">Minuten</p>
-        <p className="text-[1.7cqw] font-black uppercase tracking-[0.16em] text-[#FF0A78]">Seconden</p>
-      </div>
-    </section>
-  );
-}
-
-export function HostStartButton({
-  visible,
-  onClick,
-}: {
-  visible: boolean;
-  onClick: () => void;
-}) {
-  if (!visible) {
-    return null;
-  }
-
-  return (
-    <button
-      className="rounded-[3cqw] border-[0.28cqw] border-[#FF78B4] bg-[linear-gradient(180deg,#FF3B9D,#DB005F)] px-[5cqw] py-[2.2cqw] text-center text-[4.8cqw] font-black uppercase text-white shadow-[inset_0_0.2cqw_0_rgba(255,255,255,0.35),0_0_4.5cqw_rgba(255,10,120,0.72)] transition active:scale-[0.99]"
-      onClick={onClick}
-      type="button"
-    >
-      ▶ Start
-      <span className="block text-[1.4cqw] tracking-[0.12em] text-white/70">Ik start de quiz</span>
-    </button>
-  );
-}
-
-export function CountdownControls({ gameId }: { gameId: Id<"games"> }) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const [masterPin, setMasterPin] = useState("");
-  const [minutes, setMinutes] = useState(2);
-  const [seconds, setSeconds] = useState(15);
-  const [autoStartEnabled, setAutoStartEnabled] = useState(false);
+  const [showPin, setShowPin] = useState(false);
   const [error, setError] = useState("");
-  const setCountdown = useMutation(api.quiz.setCountdown);
-  const startCountdown = useMutation(api.quiz.startCountdown);
-  const pauseCountdown = useMutation(api.quiz.pauseCountdown);
-  const resetCountdown = useMutation(api.quiz.resetCountdown);
-  const startQuizNow = useMutation(api.quiz.startQuizNow);
+  const [isLoading, setIsLoading] = useState(false);
+  const createHostSession = useMutation(api.quiz.createHostSession);
 
-  async function run(action: () => Promise<unknown>) {
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     setError("");
+    setIsLoading(true);
+
     try {
-      await action();
+      const session = await createHostSession({ gameId, masterPin });
+      window.sessionStorage.setItem(`quizmaster-host-session:${gameId}`, session.token);
+      onAuthenticated(session.token);
     } catch (unknownError) {
-      setError(unknownError instanceof Error ? unknownError.message : "Actie is niet gelukt.");
+      setError(unknownError instanceof Error ? unknownError.message : "De pincode is niet juist");
+    } finally {
+      setIsLoading(false);
     }
   }
 
-  const durationSeconds = Math.max(0, minutes * 60 + seconds);
-
   return (
-    <section className="rounded-[2.6cqw] border border-white/15 bg-black/70 p-[2cqw] text-white">
-      <div className="grid grid-cols-2 gap-[1.2cqw]">
-        <input
-          className="h-[5cqw] rounded-[1.4cqw] border border-[#FF0A78] bg-black px-[1.5cqw] text-[1.8cqw] font-black outline-none"
-          inputMode="numeric"
-          maxLength={4}
-          onChange={(event) => setMasterPin(event.target.value.replace(/\D/g, "").slice(0, 4))}
-          placeholder="Pincode"
-          type="password"
-          value={masterPin}
-        />
-        <label className="flex items-center gap-[1cqw] text-[1.5cqw] font-black uppercase text-white/78">
-          <input
-            checked={autoStartEnabled}
-            className="h-[2.4cqw] w-[2.4cqw] accent-[#FF0A78]"
-            onChange={(event) => setAutoStartEnabled(event.target.checked)}
-            type="checkbox"
-          />
-          Auto start
-        </label>
-      </div>
-      <div className="mt-[1.3cqw] grid grid-cols-5 gap-[0.8cqw]">
-        {[
-          ["30s", 30],
-          ["1m", 60],
-          ["2m", 120],
-          ["3m", 180],
-          ["5m", 300],
-        ].map(([label, value]) => (
-          <button
-            className="min-h-[4.2cqw] rounded-[1.4cqw] bg-white/10 text-[1.5cqw] font-black text-white"
-            key={label}
-            onClick={() => {
-              setMinutes(Math.floor((value as number) / 60));
-              setSeconds((value as number) % 60);
-            }}
-            type="button"
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      <div className="mt-[1.3cqw] grid grid-cols-2 gap-[1cqw]">
-        <input
-          className="h-[5cqw] rounded-[1.4cqw] border border-[#00E7F0] bg-black px-[1.5cqw] text-center text-[2cqw] font-black outline-none"
-          min={0}
-          onChange={(event) => setMinutes(Number(event.target.value))}
-          type="number"
-          value={minutes}
-        />
-        <input
-          className="h-[5cqw] rounded-[1.4cqw] border border-[#FF0A78] bg-black px-[1.5cqw] text-center text-[2cqw] font-black outline-none"
-          max={59}
-          min={0}
-          onChange={(event) => setSeconds(Math.min(59, Number(event.target.value)))}
-          type="number"
-          value={seconds}
-        />
-      </div>
-      <div className="mt-[1.3cqw] grid grid-cols-2 gap-[1cqw]">
-        <button
-          className="min-h-[4.7cqw] rounded-[1.6cqw] bg-[#00E7F0] text-[1.7cqw] font-black uppercase text-black"
-          onClick={() =>
-            run(() => setCountdown({ gameId, masterPin, durationSeconds, autoStartEnabled }))
-          }
-          type="button"
-        >
-          Stel in
-        </button>
-        <button
-          className="min-h-[4.7cqw] rounded-[1.6cqw] bg-[#FF0A78] text-[1.7cqw] font-black uppercase text-white"
-          onClick={() => run(() => startCountdown({ gameId, masterPin }))}
-          type="button"
-        >
-          Start afteller
-        </button>
-        <button
-          className="min-h-[4.7cqw] rounded-[1.6cqw] bg-white/12 text-[1.7cqw] font-black uppercase text-white"
-          onClick={() => run(() => pauseCountdown({ gameId, masterPin }))}
-          type="button"
-        >
-          Pauzeer
-        </button>
-        <button
-          className="min-h-[4.7cqw] rounded-[1.6cqw] bg-white/12 text-[1.7cqw] font-black uppercase text-white"
-          onClick={() => run(() => resetCountdown({ gameId, masterPin }))}
-          type="button"
-        >
-          Reset
-        </button>
-      </div>
-      <button
-        className="mt-[1.3cqw] min-h-[4.8cqw] w-full rounded-[1.8cqw] bg-[linear-gradient(180deg,#FF3B9D,#DB005F)] text-[1.8cqw] font-black uppercase text-white"
-        onClick={() => run(() => startQuizNow({ gameId, masterPin }))}
-        type="button"
+    <main className="grid min-h-screen place-items-center overflow-hidden bg-[#030306] px-5 text-white">
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(255,10,120,0.2),transparent_26%),radial-gradient(circle_at_18%_70%,rgba(0,231,240,0.18),transparent_28%),linear-gradient(180deg,#030306,#080014)]" />
+      <form
+        className="relative z-10 w-full max-w-md rounded-[28px] border border-[#FF0A78] bg-[#080810]/90 p-6 shadow-[0_0_42px_rgba(255,10,120,0.34)]"
+        onSubmit={handleSubmit}
       >
-        Start quiz nu
-      </button>
-      {error ? <p className="mt-[1cqw] text-center text-[1.5cqw] font-black text-[#FFB4D1]">{error}</p> : null}
-    </section>
+        <p className="text-xs font-black uppercase tracking-[0.22em] text-[#00E7F0]">PubQuiz Live</p>
+        <h1 className="mt-3 text-4xl font-black text-white">Quizmaster toegang</h1>
+        <p className="mt-3 text-base font-bold leading-7 text-white/68">
+          Vul je pincode in om het livescherm te bedienen
+        </p>
+
+        <label className="mt-6 block space-y-2">
+          <span className="text-xs font-black uppercase tracking-[0.16em] text-[#FF0A78]">Pincode</span>
+          <div className="flex rounded-[18px] border border-[#FF0A78] bg-black shadow-[0_0_18px_rgba(255,10,120,0.3)]">
+            <input
+              autoFocus
+              className="h-14 min-w-0 flex-1 rounded-l-[18px] bg-transparent px-4 text-xl font-black text-white outline-none placeholder:text-white/22"
+              onChange={(event) => setMasterPin(event.target.value)}
+              placeholder="••••"
+              ref={inputRef}
+              type={showPin ? "text" : "password"}
+              value={masterPin}
+            />
+            <button
+              className="min-w-24 rounded-r-[18px] px-3 text-sm font-black text-[#00E7F0]"
+              onClick={() => setShowPin((visible) => !visible)}
+              type="button"
+            >
+              {showPin ? "Verberg" : "Toon"}
+            </button>
+          </div>
+        </label>
+
+        {error ? (
+          <div className="mt-4 rounded-[18px] border border-[#FF0A78] bg-[#2A0015] p-3 text-sm font-black text-[#FFD5EA]">
+            {error}
+          </div>
+        ) : null}
+
+        <div className="mt-6 grid grid-cols-2 gap-3">
+          <Link
+            className="flex min-h-14 items-center justify-center rounded-[18px] border border-white/12 bg-white/8 px-4 font-black text-white"
+            href="/master"
+          >
+            Terug
+          </Link>
+          <button
+            className="min-h-14 rounded-[18px] bg-[linear-gradient(180deg,#FF3B9D,#DB005F)] px-4 font-black text-white shadow-[0_0_22px_rgba(255,10,120,0.45)] disabled:opacity-60"
+            disabled={isLoading}
+            type="submit"
+          >
+            {isLoading ? "Controleren..." : "Doorgaan"}
+          </button>
+        </div>
+      </form>
+    </main>
   );
 }
 
-export function TikTokLiveScreen({ game, playerCount, mode }: LiveScreenProps) {
+export function TikTokLiveScreen({
+  game,
+  playerCount,
+}: {
+  game: Doc<"games">;
+  playerCount: number;
+}) {
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [remaining, setRemaining] = useState(() => secondsRemaining(game));
   const appUrl = publicAppUrl();
   const joinUrl = useMemo(() => `${appUrl}/join?code=${game.code}`, [appUrl, game.code]);
-  const startQuizNow = useMutation(api.quiz.startQuizNow);
   const autoStartIfDue = useMutation(api.quiz.autoStartIfDue);
+  const domain = displayDomain(appUrl);
+  const [domainName, domainSuffix] = domain.includes(".")
+    ? [domain.slice(0, domain.lastIndexOf(".")), domain.slice(domain.lastIndexOf("."))]
+    : [domain, ".live"];
+  const { minutes, seconds } = formatTime(remaining);
+  const isUrgent = remaining <= 10 && game.countdownStatus === "running";
+  const launchNumber = remaining <= 3 && game.countdownStatus === "running" ? remaining : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -338,20 +164,13 @@ export function TikTokLiveScreen({ game, playerCount, mode }: LiveScreenProps) {
       errorCorrectionLevel: "M",
       margin: 3,
       scale: 9,
-      color: {
-        dark: "#000000",
-        light: "#FFFFFF",
-      },
+      color: { dark: "#000000", light: "#FFFFFF" },
     })
       .then((nextQr) => {
-        if (!cancelled) {
-          setQrDataUrl(nextQr);
-        }
+        if (!cancelled) setQrDataUrl(nextQr);
       })
       .catch(() => {
-        if (!cancelled) {
-          setQrDataUrl("");
-        }
+        if (!cancelled) setQrDataUrl("");
       });
 
     return () => {
@@ -371,61 +190,244 @@ export function TikTokLiveScreen({ game, playerCount, mode }: LiveScreenProps) {
     return () => window.clearInterval(interval);
   }, [autoStartIfDue, game]);
 
-  async function handleHostStart(event?: FormEvent) {
-    event?.preventDefault();
-    const masterPin = window.prompt("Quizmaster pincode");
-    if (!masterPin) {
-      return;
+  return (
+    <div className="relative aspect-[9/16] h-[min(100vh,calc(100vw*16/9))] w-[min(100vw,calc(100vh*9/16))] overflow-hidden bg-[#030306] text-white [container-type:inline-size]">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_7%,rgba(255,10,120,0.22),transparent_24%),radial-gradient(circle_at_13%_48%,rgba(0,231,240,0.2),transparent_24%),radial-gradient(circle_at_88%_62%,rgba(168,85,247,0.2),transparent_24%),linear-gradient(180deg,#030306,#080014_54%,#030306)]" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[36cqw] bg-[radial-gradient(ellipse_at_bottom,rgba(0,231,240,0.45),transparent_61%)]" />
+      <div className="pointer-events-none absolute bottom-[-4cqw] left-1/2 h-[62cqw] w-[76cqw] -translate-x-1/2 bg-[repeating-conic-gradient(from_210deg,rgba(0,231,240,0.42)_0deg,transparent_2deg,transparent_8deg,rgba(255,10,120,0.36)_10deg,transparent_13deg)] opacity-45" />
+
+      <aside className="absolute right-[4.5cqw] top-[13.5cqw] rounded-[2.2cqw] border-[0.24cqw] border-[#FF0A78] bg-[#080810]/88 px-[2cqw] py-[1.5cqw] text-center shadow-[0_0_2.5cqw_rgba(255,10,120,0.55)]">
+        <div className="mx-auto flex h-[4.2cqw] w-[5.2cqw] items-center justify-center text-[#FF0A78]">
+          <Icon className="h-[3.5cqw] w-[3.5cqw]" name="players" />
+        </div>
+        <p className="mt-[0.4cqw] text-[4cqw] font-black leading-none text-white">{playerCount}</p>
+        <p className="mt-[0.6cqw] text-[1.4cqw] font-black uppercase leading-tight text-white/82">
+          Spelers
+          <br />
+          online
+        </p>
+      </aside>
+
+      <div className="relative z-10 flex h-full flex-col justify-between px-[6.2cqw] py-[4.2cqw]">
+        <section className="text-center">
+          <div className="mx-auto flex h-[8.5cqw] w-[8.5cqw] items-center justify-center rounded-full border-[0.45cqw] border-[#FF0A78] bg-[#030306] text-[5.7cqw] font-black text-white shadow-[0_0_3cqw_rgba(255,10,120,0.8)]">
+            ?
+          </div>
+          <h1 className="mt-[1.3cqw] text-[10.5cqw] font-black uppercase leading-[0.9] tracking-normal text-white drop-shadow-[0_0.7cqw_0_rgba(0,0,0,0.9)]">
+            Pubquiz
+          </h1>
+          <p className="-mt-[1cqw] rotate-[-5deg] text-[10.5cqw] font-black uppercase italic leading-none text-[#FF0A78] drop-shadow-[0_0_2.2cqw_rgba(255,10,120,0.75)]">
+            Live
+          </p>
+          <p className="mt-[1.2cqw] text-[1.7cqw] font-black uppercase tracking-[0.28em] text-white/82">
+            Speel mee - strijd - win
+          </p>
+        </section>
+
+        <section className="rounded-[4.5cqw] border-[0.28cqw] border-[#FF0A78] bg-[#080810]/86 px-[4cqw] py-[3.4cqw] shadow-[0_0_4.8cqw_rgba(255,10,120,0.38)]">
+          <div className="text-center">
+            <p className="text-[4.4cqw] font-black uppercase leading-none text-white">Scan & doe mee!</p>
+            <p className="mt-[0.8cqw] text-[2cqw] font-bold text-white/75">Scan de QR-code met je camera</p>
+          </div>
+          <div className="mx-auto mt-[3cqw] w-[43cqw] rounded-[3.2cqw] bg-[linear-gradient(135deg,#00E7F0,#FFFFFF_36%,#FF0A78)] p-[0.8cqw] shadow-[0_0_4cqw_rgba(0,231,240,0.58)]">
+            <div className="rounded-[2.2cqw] bg-white p-[2.2cqw]">
+              {qrDataUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img alt="QR-code om mee te doen" className="h-[37cqw] w-[37cqw]" src={qrDataUrl} />
+              ) : (
+                <div className="h-[37cqw] w-[37cqw] bg-white" />
+              )}
+            </div>
+          </div>
+          <p className="mt-[2.5cqw] text-center text-[1.6cqw] font-black uppercase text-white/75">Of ga naar</p>
+          <p className="text-center text-[5cqw] font-black lowercase leading-none drop-shadow-[0_0_2cqw_rgba(0,231,240,0.7)]">
+            <span className="text-[#00E7F0]">{domainName}</span>
+            <span className="text-[#FF0A78]">{domainSuffix}</span>
+          </p>
+          <p className="mt-[2.3cqw] text-center text-[1.7cqw] font-black uppercase tracking-[0.18em] text-[#FF0A78]">
+            Quiz code
+          </p>
+          <div className="mx-auto mt-[0.6cqw] rounded-[2.4cqw] border-[0.22cqw] border-[#FF0A78] bg-black px-[3cqw] py-[1.2cqw] shadow-[-1.5cqw_0_3cqw_rgba(0,231,240,0.25),1.5cqw_0_3cqw_rgba(255,10,120,0.35)]">
+            <p className="text-center text-[5.4cqw] font-black uppercase tracking-[0.13em] text-white">
+              {game.code}
+            </p>
+          </div>
+        </section>
+
+        <section
+          className={`relative rounded-[3.2cqw] border-[0.28cqw] bg-[#080810]/92 px-[4cqw] py-[2.2cqw] text-center shadow-[0_0_4cqw_rgba(0,231,240,0.28)] ${
+            isUrgent ? "border-[#FF0A78] shadow-[0_0_5cqw_rgba(255,10,120,0.55)]" : "border-[#00E7F0]"
+          }`}
+        >
+          {launchNumber ? (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-[3cqw] bg-black/50 text-[20cqw] font-black text-[#FF0A78] opacity-90">
+              {launchNumber}
+            </div>
+          ) : null}
+          <p className="text-[1.7cqw] font-black uppercase tracking-[0.18em] text-white/78">
+            {game.countdownStatus === "paused"
+              ? "Afteller gepauzeerd"
+              : game.status === "live"
+                ? "De quiz is live"
+                : "De quiz start over"}
+          </p>
+          <div className={`mt-[0.7cqw] text-[9.4cqw] font-black leading-none text-white ${isUrgent ? "animate-pulse" : ""}`}>
+            {minutes} : {seconds}
+          </div>
+          <div className="mx-auto mt-[1cqw] grid max-w-[42cqw] grid-cols-2 gap-[4cqw]">
+            <p className="text-[1.7cqw] font-black uppercase tracking-[0.16em] text-[#00E7F0]">Minuten</p>
+            <p className="text-[1.7cqw] font-black uppercase tracking-[0.16em] text-[#FF0A78]">Seconden</p>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+export function CountdownControls({
+  gameId,
+  hostSessionToken,
+}: {
+  gameId: Id<"games">;
+  hostSessionToken: string;
+}) {
+  const [minutes, setMinutes] = useState(2);
+  const [seconds, setSeconds] = useState(15);
+  const [autoStartEnabled, setAutoStartEnabled] = useState(false);
+  const [error, setError] = useState("");
+  const setCountdown = useMutation(api.quiz.setCountdown);
+  const startCountdown = useMutation(api.quiz.startCountdown);
+  const pauseCountdown = useMutation(api.quiz.pauseCountdown);
+  const resetCountdown = useMutation(api.quiz.resetCountdown);
+  const startQuizNow = useMutation(api.quiz.startQuizNow);
+  const durationSeconds = Math.max(0, minutes * 60 + seconds);
+
+  async function run(action: () => Promise<unknown>) {
+    setError("");
+    try {
+      await action();
+    } catch (unknownError) {
+      setError(unknownError instanceof Error ? unknownError.message : "Actie is niet gelukt.");
     }
-    await startQuizNow({ gameId: game._id, masterPin });
   }
 
   return (
-    <main className="grid h-screen w-screen place-items-center overflow-hidden bg-black">
-      <div className="relative aspect-[9/16] h-[min(100vh,calc(100vw*16/9))] w-[min(100vw,calc(100vh*9/16))] overflow-hidden bg-[#030306] text-white [container-type:inline-size]">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_7%,rgba(255,10,120,0.22),transparent_24%),radial-gradient(circle_at_13%_48%,rgba(0,231,240,0.2),transparent_24%),radial-gradient(circle_at_88%_62%,rgba(168,85,247,0.2),transparent_24%),linear-gradient(180deg,#030306,#080014_54%,#030306)]" />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[36cqw] bg-[radial-gradient(ellipse_at_bottom,rgba(0,231,240,0.45),transparent_61%)]" />
-        <div className="pointer-events-none absolute bottom-[-4cqw] left-1/2 h-[62cqw] w-[76cqw] -translate-x-1/2 bg-[repeating-conic-gradient(from_210deg,rgba(0,231,240,0.42)_0deg,transparent_2deg,transparent_8deg,rgba(255,10,120,0.36)_10deg,transparent_13deg)] opacity-45" />
+    <section className="rounded-[24px] border border-white/15 bg-black/70 p-5 text-white shadow-[0_0_34px_rgba(0,231,240,0.12)]">
+      <label className="flex min-h-12 items-center gap-3 rounded-[18px] bg-white/8 px-4 text-sm font-black uppercase text-white/78">
+        <input
+          checked={autoStartEnabled}
+          className="h-5 w-5 accent-[#FF0A78]"
+          onChange={(event) => setAutoStartEnabled(event.target.checked)}
+          type="checkbox"
+        />
+        Quiz automatisch starten bij 00:00
+      </label>
 
-        <PlayerCountBadge count={playerCount} />
-
-        <div className="relative z-10 flex h-full flex-col justify-between px-[6.2cqw] py-[4.2cqw]">
-          <LiveLogo />
-          <JoinQrCard code={game.code} qrDataUrl={qrDataUrl} siteUrl={appUrl} />
-          <LiveCountdown game={game} remaining={remaining} />
-          {mode === "control" ? (
-            <div className="grid gap-[1.5cqw]">
-              <HostStartButton visible onClick={() => void handleHostStart()} />
-              <CountdownControls gameId={game._id} />
-            </div>
-          ) : (
-            <HostStartButton visible={false} onClick={() => undefined} />
-          )}
-        </div>
-
-        <style jsx global>{`
-          @keyframes player-pop {
-            0% {
-              transform: scale(0.82);
-              color: #00e7f0;
-            }
-            100% {
-              transform: scale(1);
-              color: #ffffff;
-            }
-          }
-
-          @media (prefers-reduced-motion: reduce) {
-            *,
-            *::before,
-            *::after {
-              animation-duration: 0.01ms !important;
-              animation-iteration-count: 1 !important;
-              transition-duration: 0.01ms !important;
-            }
-          }
-        `}</style>
+      <div className="mt-4 grid grid-cols-5 gap-2">
+        {[
+          ["30s", 30],
+          ["1m", 60],
+          ["2m", 120],
+          ["3m", 180],
+          ["5m", 300],
+        ].map(([label, value]) => (
+          <button
+            className="min-h-11 rounded-[14px] bg-white/10 text-sm font-black text-white"
+            key={label}
+            onClick={() => {
+              setMinutes(Math.floor((value as number) / 60));
+              setSeconds((value as number) % 60);
+            }}
+            type="button"
+          >
+            {label}
+          </button>
+        ))}
       </div>
-    </main>
+
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <input
+          className="h-12 rounded-[16px] border border-[#00E7F0] bg-black px-4 text-center text-xl font-black outline-none"
+          min={0}
+          onChange={(event) => setMinutes(Number(event.target.value))}
+          type="number"
+          value={minutes}
+        />
+        <input
+          className="h-12 rounded-[16px] border border-[#FF0A78] bg-black px-4 text-center text-xl font-black outline-none"
+          max={59}
+          min={0}
+          onChange={(event) => setSeconds(Math.min(59, Number(event.target.value)))}
+          type="number"
+          value={seconds}
+        />
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <button
+          className="min-h-12 rounded-[16px] bg-[#00E7F0] text-sm font-black uppercase text-black"
+          onClick={() => run(() => setCountdown({ gameId, hostSessionToken, durationSeconds, autoStartEnabled }))}
+          type="button"
+        >
+          Stel in
+        </button>
+        <button
+          className="min-h-12 rounded-[16px] bg-[#FF0A78] text-sm font-black uppercase text-white"
+          onClick={() => run(() => startCountdown({ gameId, hostSessionToken }))}
+          type="button"
+        >
+          Start afteller
+        </button>
+        <button
+          className="min-h-12 rounded-[16px] bg-white/12 text-sm font-black uppercase text-white"
+          onClick={() => run(() => pauseCountdown({ gameId, hostSessionToken }))}
+          type="button"
+        >
+          Pauzeer
+        </button>
+        <button
+          className="min-h-12 rounded-[16px] bg-white/12 text-sm font-black uppercase text-white"
+          onClick={() => run(() => resetCountdown({ gameId, hostSessionToken }))}
+          type="button"
+        >
+          Reset
+        </button>
+      </div>
+
+      <button
+        className="mt-4 min-h-14 w-full rounded-[18px] bg-[linear-gradient(180deg,#FF3B9D,#DB005F)] text-base font-black uppercase text-white"
+        onClick={() => run(() => startQuizNow({ gameId, hostSessionToken }))}
+        type="button"
+      >
+        ▶ Start quiz nu
+      </button>
+      {error ? <p className="mt-3 text-center text-sm font-black text-[#FFB4D1]">{error}</p> : null}
+    </section>
+  );
+}
+
+export function HostControlPanel({
+  game,
+  players,
+  hostSessionToken,
+}: {
+  game: Doc<"games">;
+  players: Array<Doc<"players">>;
+  hostSessionToken: string;
+}) {
+  return (
+    <div className="space-y-5">
+      <section className="rounded-[24px] border border-[#FF0A78] bg-[#080810]/88 p-5 text-white shadow-[0_0_34px_rgba(255,10,120,0.22)]">
+        <p className="text-xs font-black uppercase tracking-[0.2em] text-[#00E7F0]">Host bediening</p>
+        <h1 className="mt-2 text-3xl font-black">TikTok LIVE</h1>
+        <p className="mt-2 text-sm font-bold text-white/62">Code: {game.code}</p>
+      </section>
+      <CountdownControls gameId={game._id} hostSessionToken={hostSessionToken} />
+      <section className="rounded-[24px] border border-white/12 bg-black/60 p-5 text-white">
+        <p className="text-xs font-black uppercase tracking-[0.2em] text-[#FF0A78]">Spelers</p>
+        <p className="mt-2 text-5xl font-black">{players.length}</p>
+        <p className="mt-1 text-sm font-bold text-white/55">aangesloten spelers</p>
+      </section>
+    </div>
   );
 }

@@ -26,6 +26,23 @@ export default defineSchema({
     .index("by_gameId", ["gameId"])
     .index("by_gameId_score", ["gameId", "score"]),
 
+  hostSessions: defineTable({
+    gameId: v.id("games"),
+    token: v.string(),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+    lastUsedAt: v.number(),
+  })
+    .index("by_token", ["token"])
+    .index("by_gameId", ["gameId"]),
+
+  hostLoginAttempts: defineTable({
+    gameId: v.id("games"),
+    attempts: v.number(),
+    lastAttemptAt: v.number(),
+    blockedUntil: v.optional(v.number()),
+  }).index("by_gameId", ["gameId"]),
+
   gameState: defineTable({
     gameId: v.id("games"),
     phase: v.string(),

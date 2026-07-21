@@ -245,17 +245,24 @@ export default function MasterGamePage() {
               />
               <p className="break-all text-xs font-bold text-[#667085]">{joinUrl}</p>
               <a
+                className="flex min-h-14 w-full items-center justify-center gap-3 rounded-[22px] bg-[linear-gradient(135deg,#00E7F0,#2D77F6)] px-5 font-black text-white shadow-[0_16px_34px_rgba(0,231,240,0.22)]"
+                href={publicLiveUrl}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Open publiek livescherm
+                <Icon name="arrow" />
+              </a>
+              <a
                 className="flex min-h-14 w-full items-center justify-center gap-3 rounded-[22px] bg-[linear-gradient(135deg,#FF0A78,#A855F7)] px-5 font-black text-white shadow-[0_16px_34px_rgba(255,10,120,0.25)]"
                 href={liveScreenUrl}
                 rel="noreferrer"
                 target="_blank"
               >
-                Open TikTok-scherm
-                <Icon name="arrow" />
+                Open bediening
+                <Icon name="lock" />
               </a>
-              <p className="break-all text-xs font-bold text-[#667085]">
-                OBS display-link: {publicLiveUrl}
-              </p>
+              <p className="break-all text-xs font-bold text-[#667085]">OBS display-link: {publicLiveUrl}</p>
             </div>
           </InfoCard>
         ) : null}

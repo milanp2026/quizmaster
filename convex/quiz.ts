@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 
 function createGameCode() {
@@ -36,6 +36,17 @@ function speedBonusForRank(rank: number) {
   return [5, 3, 2][rank] ?? 0;
 }
 
+function createSessionToken() {
+  const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let token = "";
+
+  for (let index = 0; index < 48; index += 1) {
+    token += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+
+  return token;
+}
+
 async function getGameStateByGameId(ctx: MutationCtx | QueryCtx, gameId: Id<"games">) {
   return await ctx.db
     .query("gameState")
@@ -43,10 +54,46 @@ async function getGameStateByGameId(ctx: MutationCtx | QueryCtx, gameId: Id<"gam
     .first();
 }
 
-function requireMaster(game: { masterPin: string } | null, masterPin: string) {
-  if (!game || game.masterPin !== masterPin) {
-    throw new Error("Quizmaster pincode klopt niet.");
+async function validateHostToken(ctx: MutationCtx | QueryCtx, gameId: Id<"games">, token: string) {
+  if (!token) {
+    return null;
   }
+
+  const session = await ctx.db.query("hostSessions").withIndex("by_token", (q) => q.eq("token", token)).first();
+  if (!session || session.gameId !== gameId || session.expiresAt < Date.now()) {
+    return null;
+  }
+
+  return session;
+}
+
+async function requireHostSession(ctx: MutationCtx, gameId: Id<"games">, token: string) {
+  const session = await validateHostToken(ctx, gameId, token);
+  if (!session) {
+    throw new Error("Hostsessie is verlopen. Log opnieuw in.");
+  }
+
+  await ctx.db.patch(session._id, { lastUsedAt: Date.now() });
+  return session;
+}
+
+async function getLoginAttempts(ctx: MutationCtx, gameId: Id<"games">) {
+  const existing = await ctx.db
+    .query("hostLoginAttempts")
+    .withIndex("by_gameId", (q) => q.eq("gameId", gameId))
+    .first();
+
+  if (existing) {
+    return existing;
+  }
+
+  const attemptId = await ctx.db.insert("hostLoginAttempts", {
+    gameId,
+    attempts: 0,
+    lastAttemptAt: Date.now(),
+  });
+
+  return (await ctx.db.get(attemptId)) as Doc<"hostLoginAttempts">;
 }
 
 export const createGame = mutation({
@@ -184,6 +231,64 @@ export const getGame = query({
   },
   handler: async (ctx, args) => {
     return await ctx.db.get(args.gameId);
+  },
+});
+
+export const validateHostSession = query({
+  args: {
+    gameId: v.id("games"),
+    token: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const session = await validateHostToken(ctx, args.gameId, args.token);
+    return {
+      valid: Boolean(session),
+      expiresAt: session?.expiresAt ?? null,
+    };
+  },
+});
+
+export const createHostSession = mutation({
+  args: {
+    gameId: v.id("games"),
+    masterPin: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    const attempts = await getLoginAttempts(ctx, args.gameId);
+    const timestamp = Date.now();
+
+    if (attempts.blockedUntil && attempts.blockedUntil > timestamp) {
+      throw new Error("Wacht even voordat je opnieuw probeert.");
+    }
+
+    if (!game || game.masterPin !== args.masterPin) {
+      const nextAttempts = attempts.attempts + 1;
+      await ctx.db.patch(attempts._id, {
+        attempts: nextAttempts,
+        lastAttemptAt: timestamp,
+        blockedUntil: nextAttempts >= 3 ? timestamp + 2500 : undefined,
+      });
+      throw new Error("De pincode is niet juist");
+    }
+
+    await ctx.db.patch(attempts._id, {
+      attempts: 0,
+      lastAttemptAt: timestamp,
+      blockedUntil: undefined,
+    });
+
+    const token = createSessionToken();
+    const expiresAt = timestamp + 1000 * 60 * 60 * 4;
+    await ctx.db.insert("hostSessions", {
+      gameId: args.gameId,
+      token,
+      createdAt: timestamp,
+      expiresAt,
+      lastUsedAt: timestamp,
+    });
+
+    return { token, expiresAt };
   },
 });
 
@@ -490,13 +595,12 @@ export const setScoreboardVisible = mutation({
 export const setCountdown = mutation({
   args: {
     gameId: v.id("games"),
-    masterPin: v.string(),
+    hostSessionToken: v.string(),
     durationSeconds: v.number(),
     autoStartEnabled: v.boolean(),
   },
   handler: async (ctx, args) => {
-    const game = await ctx.db.get(args.gameId);
-    requireMaster(game, args.masterPin);
+    await requireHostSession(ctx, args.gameId, args.hostSessionToken);
 
     const durationSeconds = Math.min(Math.max(Math.floor(args.durationSeconds), 0), 60 * 60);
     await ctx.db.patch(args.gameId, {
@@ -514,11 +618,11 @@ export const setCountdown = mutation({
 export const startCountdown = mutation({
   args: {
     gameId: v.id("games"),
-    masterPin: v.string(),
+    hostSessionToken: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireHostSession(ctx, args.gameId, args.hostSessionToken);
     const game = await ctx.db.get(args.gameId);
-    requireMaster(game, args.masterPin);
 
     const durationSeconds =
       game?.countdownPausedRemainingSeconds ?? game?.countdownDurationSeconds ?? 0;
@@ -546,11 +650,11 @@ export const startCountdown = mutation({
 export const pauseCountdown = mutation({
   args: {
     gameId: v.id("games"),
-    masterPin: v.string(),
+    hostSessionToken: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireHostSession(ctx, args.gameId, args.hostSessionToken);
     const game = await ctx.db.get(args.gameId);
-    requireMaster(game, args.masterPin);
 
     const remainingSeconds = Math.max(
       0,
@@ -569,11 +673,11 @@ export const pauseCountdown = mutation({
 export const resetCountdown = mutation({
   args: {
     gameId: v.id("games"),
-    masterPin: v.string(),
+    hostSessionToken: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireHostSession(ctx, args.gameId, args.hostSessionToken);
     const game = await ctx.db.get(args.gameId);
-    requireMaster(game, args.masterPin);
 
     await ctx.db.patch(args.gameId, {
       scheduledStartAt: undefined,
@@ -593,11 +697,10 @@ export const resetCountdown = mutation({
 export const startQuizNow = mutation({
   args: {
     gameId: v.id("games"),
-    masterPin: v.string(),
+    hostSessionToken: v.string(),
   },
   handler: async (ctx, args) => {
-    const game = await ctx.db.get(args.gameId);
-    requireMaster(game, args.masterPin);
+    await requireHostSession(ctx, args.gameId, args.hostSessionToken);
 
     await ctx.db.patch(args.gameId, {
       status: "live",

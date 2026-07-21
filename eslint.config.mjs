@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "Quizmaster-GitHub-map/**",
+    "Quizmaster-GitHub-map-bonus-battle/**",
+    "Quizmaster-GitHub-map-tiktok-live/**",
+    "quizmaster-live-github-20260713-redesign/**",
+    "quizmaster-live-github-20260721-tiktok-live/**",
   ]),
 ]);
 

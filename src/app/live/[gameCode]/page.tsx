@@ -25,5 +25,9 @@ export default function PublicLiveScreenPage() {
     );
   }
 
-  return <TikTokLiveScreen game={liveLobby.game} mode="display" playerCount={liveLobby.playerCount} />;
+  return (
+    <main className="grid h-screen w-screen place-items-center overflow-hidden bg-black">
+      <TikTokLiveScreen game={liveLobby.game} playerCount={liveLobby.playerCount} />
+    </main>
+  );
 }
