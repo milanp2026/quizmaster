@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as battles from "../battles.js";
 import type * as quiz from "../quiz.js";
 
 import type {
@@ -17,6 +18,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  battles: typeof battles;
   quiz: typeof quiz;
 }>;
 

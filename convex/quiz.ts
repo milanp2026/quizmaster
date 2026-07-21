@@ -1,21 +1,52 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 
 function createGameCode() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+
+  for (let index = 0; index < 6; index += 1) {
+    code += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+
+  return code;
 }
 
 function normalizePlayerName(name: string) {
   return name.trim().replace(/\s+/g, " ");
 }
 
+function normalizeGameCode(code: string) {
+  return code.trim().replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+}
+
 function isPlayerActive(player: { active?: boolean }) {
   return player.active !== false;
 }
 
+function hasBlockedWord(name: string) {
+  const blockedWords = ["kanker", "kk", "kut", "hoer", "nazi", "hitler", "mongool"];
+  const lowerName = name.toLowerCase();
+  return blockedWords.some((word) => lowerName.includes(word));
+}
+
 function speedBonusForRank(rank: number) {
   return [5, 3, 2][rank] ?? 0;
+}
+
+async function getGameStateByGameId(ctx: MutationCtx | QueryCtx, gameId: Id<"games">) {
+  return await ctx.db
+    .query("gameState")
+    .withIndex("by_gameId", (q) => q.eq("gameId", gameId))
+    .first();
+}
+
+function requireMaster(game: { masterPin: string } | null, masterPin: string) {
+  if (!game || game.masterPin !== masterPin) {
+    throw new Error("Quizmaster pincode klopt niet.");
+  }
 }
 
 export const createGame = mutation({
@@ -46,6 +77,10 @@ export const createGame = mutation({
       code,
       masterPin: args.masterPin,
       status: "lobby",
+      countdownStatus: "idle",
+      countdownDurationSeconds: 0,
+      autoStartEnabled: false,
+      joinOpen: true,
       createdAt: Date.now(),
     });
 
@@ -66,15 +101,23 @@ export const joinGame = mutation({
     name: v.string(),
   },
   handler: async (ctx, args) => {
-    const code = args.code.trim();
+    const code = normalizeGameCode(args.code);
     const baseName = normalizePlayerName(args.name);
 
-    if (!/^\d{6}$/.test(code)) {
-      throw new Error("Voer een gamecode van 6 cijfers in.");
+    if (!/^[A-Z0-9]{6}$/.test(code)) {
+      throw new Error("Voer een gamecode van 6 tekens in.");
     }
 
-    if (baseName.length < 2) {
-      throw new Error("Voer een naam van minimaal 2 tekens in.");
+    if (baseName.length < 2 || baseName.length > 18) {
+      throw new Error("Gebruik een nickname van 2 tot 18 tekens.");
+    }
+
+    if (!/^[\p{L}\p{N}\p{Emoji}\s_]+$/u.test(baseName)) {
+      throw new Error("Gebruik letters, cijfers, spaties, underscores of emoji.");
+    }
+
+    if (hasBlockedWord(baseName)) {
+      throw new Error("Kies een andere nickname.");
     }
 
     const game = await ctx.db
@@ -86,6 +129,10 @@ export const joinGame = mutation({
       throw new Error("Geen game gevonden met deze code.");
     }
 
+    if (game.joinOpen === false || game.status === "finished") {
+      throw new Error("Meedoen is gesloten.");
+    }
+
     const players = await ctx.db
       .query("players")
       .withIndex("by_gameId", (q) => q.eq("gameId", game._id))
@@ -94,12 +141,10 @@ export const joinGame = mutation({
     const usedNames = new Set(
       players.filter(isPlayerActive).map((player) => player.name.toLowerCase()),
     );
-    let playerName = baseName;
-    let number = 2;
+    const playerName = baseName;
 
-    while (usedNames.has(playerName.toLowerCase())) {
-      playerName = `${baseName} ${number}`;
-      number += 1;
+    if (usedNames.has(playerName.toLowerCase())) {
+      throw new Error("Deze nickname is al in gebruik.");
     }
 
     const playerId = await ctx.db.insert("players", {
@@ -107,6 +152,7 @@ export const joinGame = mutation({
       name: playerName,
       score: 0,
       joinedAt: Date.now(),
+      lastSeenAt: Date.now(),
       active: true,
     });
 
@@ -115,6 +161,20 @@ export const joinGame = mutation({
       playerId,
       name: playerName,
     };
+  },
+});
+
+export const getGameByCode = query({
+  args: {
+    code: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const code = normalizeGameCode(args.code);
+    if (!/^[A-Z0-9]{6}$/.test(code)) {
+      return null;
+    }
+
+    return await ctx.db.query("games").withIndex("by_code", (q) => q.eq("code", code)).first();
   },
 });
 
@@ -127,6 +187,32 @@ export const getGame = query({
   },
 });
 
+export const getLiveLobby = query({
+  args: {
+    code: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const code = normalizeGameCode(args.code);
+    const game = await ctx.db.query("games").withIndex("by_code", (q) => q.eq("code", code)).first();
+
+    if (!game) {
+      return null;
+    }
+
+    const players = await ctx.db
+      .query("players")
+      .withIndex("by_gameId", (q) => q.eq("gameId", game._id))
+      .collect();
+    const gameState = await getGameStateByGameId(ctx, game._id);
+
+    return {
+      game,
+      gameState,
+      playerCount: players.filter(isPlayerActive).filter((player) => player.name.trim().length > 0).length,
+    };
+  },
+});
+
 export const getPlayer = query({
   args: {
     playerId: v.id("players"),
@@ -134,6 +220,22 @@ export const getPlayer = query({
   handler: async (ctx, args) => {
     const player = await ctx.db.get(args.playerId);
     return player && isPlayerActive(player) ? player : null;
+  },
+});
+
+export const keepPlayerOnline = mutation({
+  args: {
+    playerId: v.id("players"),
+  },
+  handler: async (ctx, args) => {
+    const player = await ctx.db.get(args.playerId);
+    if (!player || !isPlayerActive(player)) {
+      throw new Error("Speler niet gevonden.");
+    }
+
+    await ctx.db.patch(args.playerId, {
+      lastSeenAt: Date.now(),
+    });
   },
 });
 
@@ -382,6 +484,162 @@ export const setScoreboardVisible = mutation({
       scoreboardVisible: args.visible,
       answersOpen: false,
     });
+  },
+});
+
+export const setCountdown = mutation({
+  args: {
+    gameId: v.id("games"),
+    masterPin: v.string(),
+    durationSeconds: v.number(),
+    autoStartEnabled: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    requireMaster(game, args.masterPin);
+
+    const durationSeconds = Math.min(Math.max(Math.floor(args.durationSeconds), 0), 60 * 60);
+    await ctx.db.patch(args.gameId, {
+      countdownDurationSeconds: durationSeconds,
+      countdownPausedRemainingSeconds: durationSeconds,
+      countdownStatus: durationSeconds > 0 ? "ready" : "idle",
+      scheduledStartAt: undefined,
+      autoStartEnabled: args.autoStartEnabled,
+      status: "lobby",
+      joinOpen: true,
+    });
+  },
+});
+
+export const startCountdown = mutation({
+  args: {
+    gameId: v.id("games"),
+    masterPin: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    requireMaster(game, args.masterPin);
+
+    const durationSeconds =
+      game?.countdownPausedRemainingSeconds ?? game?.countdownDurationSeconds ?? 0;
+    if (durationSeconds <= 0) {
+      throw new Error("Stel eerst een afteltijd in.");
+    }
+
+    const scheduledStartAt = Date.now() + durationSeconds * 1000;
+    await ctx.db.patch(args.gameId, {
+      scheduledStartAt,
+      countdownDurationSeconds: durationSeconds,
+      countdownPausedRemainingSeconds: undefined,
+      countdownStatus: "running",
+      status: "countdown",
+      joinOpen: true,
+    });
+
+    const gameState = await getGameStateByGameId(ctx, args.gameId);
+    if (gameState) {
+      await ctx.db.patch(gameState._id, { phase: "countdown" });
+    }
+  },
+});
+
+export const pauseCountdown = mutation({
+  args: {
+    gameId: v.id("games"),
+    masterPin: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    requireMaster(game, args.masterPin);
+
+    const remainingSeconds = Math.max(
+      0,
+      Math.ceil(((game?.scheduledStartAt ?? Date.now()) - Date.now()) / 1000),
+    );
+
+    await ctx.db.patch(args.gameId, {
+      countdownPausedRemainingSeconds: remainingSeconds,
+      scheduledStartAt: undefined,
+      countdownStatus: "paused",
+      status: "paused",
+    });
+  },
+});
+
+export const resetCountdown = mutation({
+  args: {
+    gameId: v.id("games"),
+    masterPin: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    requireMaster(game, args.masterPin);
+
+    await ctx.db.patch(args.gameId, {
+      scheduledStartAt: undefined,
+      countdownPausedRemainingSeconds: game?.countdownDurationSeconds ?? 0,
+      countdownStatus: (game?.countdownDurationSeconds ?? 0) > 0 ? "ready" : "idle",
+      status: "lobby",
+      joinOpen: true,
+    });
+
+    const gameState = await getGameStateByGameId(ctx, args.gameId);
+    if (gameState) {
+      await ctx.db.patch(gameState._id, { phase: "lobby" });
+    }
+  },
+});
+
+export const startQuizNow = mutation({
+  args: {
+    gameId: v.id("games"),
+    masterPin: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    requireMaster(game, args.masterPin);
+
+    await ctx.db.patch(args.gameId, {
+      status: "live",
+      countdownStatus: "finished",
+      scheduledStartAt: undefined,
+      countdownPausedRemainingSeconds: 0,
+      joinOpen: true,
+    });
+
+    const gameState = await getGameStateByGameId(ctx, args.gameId);
+    if (gameState) {
+      await ctx.db.patch(gameState._id, { phase: "live" });
+    }
+  },
+});
+
+export const autoStartIfDue = mutation({
+  args: {
+    gameId: v.id("games"),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game || !game.autoStartEnabled || game.countdownStatus !== "running") {
+      return false;
+    }
+    if (!game.scheduledStartAt || game.scheduledStartAt > Date.now()) {
+      return false;
+    }
+
+    await ctx.db.patch(args.gameId, {
+      status: "live",
+      countdownStatus: "finished",
+      scheduledStartAt: undefined,
+      countdownPausedRemainingSeconds: 0,
+    });
+
+    const gameState = await getGameStateByGameId(ctx, args.gameId);
+    if (gameState) {
+      await ctx.db.patch(gameState._id, { phase: "live" });
+    }
+
+    return true;
   },
 });
 

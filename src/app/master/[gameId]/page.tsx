@@ -17,6 +17,8 @@ import {
 } from "@/components/quiz-ui";
 
 type QuestionType = "multiple_choice" | "open";
+type BattleQuestionType = "multiple_choice" | "open" | "photo";
+type BattleJudgingMode = "automatic" | "manual";
 
 export default function MasterGamePage() {
   const params = useParams<{ gameId: string }>();
@@ -27,6 +29,23 @@ export default function MasterGamePage() {
   const questions = useQuery(api.quiz.listQuestions, { gameId });
   const currentQuestion = useQuery(api.quiz.getCurrentQuestion, { gameId });
   const answers = useQuery(api.quiz.listAnswersForCurrentQuestion, { gameId });
+  const activeBattle = useQuery(api.battles.getActiveBattle, { gameId });
+  const battlePlayers = useQuery(
+    api.battles.getBattlePlayers,
+    activeBattle ? { battleId: activeBattle._id } : "skip",
+  );
+  const battleVotes = useQuery(
+    api.battles.getBattleVotes,
+    activeBattle ? { battleId: activeBattle._id } : "skip",
+  );
+  const battleQuestion = useQuery(
+    api.battles.getCurrentBattleQuestion,
+    activeBattle ? { battleId: activeBattle._id } : "skip",
+  );
+  const battleAnswers = useQuery(
+    api.battles.getBattleAnswers,
+    activeBattle ? { battleId: activeBattle._id } : "skip",
+  );
   const createQuestion = useMutation(api.quiz.createQuestion);
   const publishQuestion = useMutation(api.quiz.publishQuestion);
   const closeAnswers = useMutation(api.quiz.closeAnswers);
@@ -35,6 +54,15 @@ export default function MasterGamePage() {
   const setScoreboardVisible = useMutation(api.quiz.setScoreboardVisible);
   const renamePlayer = useMutation(api.quiz.renamePlayer);
   const removePlayer = useMutation(api.quiz.removePlayer);
+  const startBattle = useMutation(api.battles.startBattle);
+  const finishBattleVoting = useMutation(api.battles.finishVoting);
+  const confirmBattlePlayers = useMutation(api.battles.confirmBattlePlayers);
+  const createBattleQuestion = useMutation(api.battles.createBattleQuestion);
+  const closeBattleQuestion = useMutation(api.battles.closeBattleQuestion);
+  const judgeBattleAnswer = useMutation(api.battles.judgeBattleAnswer);
+  const completeBattleQuestion = useMutation(api.battles.completeBattleQuestion);
+  const awardBattlePoints = useMutation(api.battles.awardBattlePoints);
+  const cancelBattle = useMutation(api.battles.cancelBattle);
   const [prompt, setPrompt] = useState("");
   const [type, setType] = useState<QuestionType>("multiple_choice");
   const [optionA, setOptionA] = useState("");
@@ -49,6 +77,22 @@ export default function MasterGamePage() {
   const [editingPlayerId, setEditingPlayerId] = useState("");
   const [editingName, setEditingName] = useState("");
   const [origin, setOrigin] = useState("");
+  const [battleTotalQuestions, setBattleTotalQuestions] = useState(1);
+  const [battlePointsPerCorrect, setBattlePointsPerCorrect] = useState(10);
+  const [battleWinnerBonus, setBattleWinnerBonus] = useState(20);
+  const [battleLoserPoints, setBattleLoserPoints] = useState(5);
+  const [battleVotingSeconds, setBattleVotingSeconds] = useState(10);
+  const [battleAnswerSeconds, setBattleAnswerSeconds] = useState(15);
+  const [battleQuestionType, setBattleQuestionType] = useState<BattleQuestionType>("multiple_choice");
+  const [battleJudgingMode, setBattleJudgingMode] = useState<BattleJudgingMode>("automatic");
+  const [battlePrompt, setBattlePrompt] = useState("");
+  const [battleOptionA, setBattleOptionA] = useState("");
+  const [battleOptionB, setBattleOptionB] = useState("");
+  const [battleOptionC, setBattleOptionC] = useState("");
+  const [battleOptionD, setBattleOptionD] = useState("");
+  const [battleCorrectOption, setBattleCorrectOption] = useState("A");
+  const [battlePlayerOneId, setBattlePlayerOneId] = useState("");
+  const [battlePlayerTwoId, setBattlePlayerTwoId] = useState("");
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -72,6 +116,8 @@ export default function MasterGamePage() {
     [questions],
   );
   const joinUrl = origin && game?.code ? `${origin}/join?code=${game.code}` : "";
+  const liveScreenUrl = origin && game?._id ? `${origin}/host/live-screen/${game._id}` : "";
+  const publicLiveUrl = origin && game?.code ? `${origin}/live/${game.code}` : "";
   const qrCodeUrl = joinUrl
     ? `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=12&data=${encodeURIComponent(
         joinUrl,
@@ -124,6 +170,50 @@ export default function MasterGamePage() {
     });
   }
 
+  async function handleStartBattle() {
+    await runAction("startBattle", () =>
+      startBattle({
+        gameId,
+        totalQuestions: battleTotalQuestions,
+        pointsPerCorrect: battlePointsPerCorrect,
+        winnerBonus: battleWinnerBonus,
+        loserPoints: battleLoserPoints,
+        votingDurationSeconds: battleVotingSeconds,
+        answerDurationSeconds: battleAnswerSeconds,
+        questionType: battleQuestionType,
+        judgingMode: battleJudgingMode,
+      }),
+    );
+  }
+
+  async function handleCreateBattleQuestion(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!activeBattle) {
+      return;
+    }
+
+    await runAction("createBattleQuestion", async () => {
+      await createBattleQuestion({
+        battleId: activeBattle._id,
+        prompt: battlePrompt,
+        type: battleQuestionType,
+        optionA: battleQuestionType === "multiple_choice" ? battleOptionA : undefined,
+        optionB: battleQuestionType === "multiple_choice" ? battleOptionB : undefined,
+        optionC: battleQuestionType === "multiple_choice" ? battleOptionC : undefined,
+        optionD: battleQuestionType === "multiple_choice" ? battleOptionD : undefined,
+        correctOption:
+          battleQuestionType === "multiple_choice" && battleJudgingMode === "automatic"
+            ? battleCorrectOption
+            : undefined,
+      });
+      setBattlePrompt("");
+      setBattleOptionA("");
+      setBattleOptionB("");
+      setBattleOptionC("");
+      setBattleOptionD("");
+    });
+  }
+
   return (
     <PageShell withBottomSpace>
       <div className="space-y-6">
@@ -154,6 +244,18 @@ export default function MasterGamePage() {
                 width={176}
               />
               <p className="break-all text-xs font-bold text-[#667085]">{joinUrl}</p>
+              <a
+                className="flex min-h-14 w-full items-center justify-center gap-3 rounded-[22px] bg-[linear-gradient(135deg,#FF0A78,#A855F7)] px-5 font-black text-white shadow-[0_16px_34px_rgba(255,10,120,0.25)]"
+                href={liveScreenUrl}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Open TikTok-scherm
+                <Icon name="arrow" />
+              </a>
+              <p className="break-all text-xs font-bold text-[#667085]">
+                OBS display-link: {publicLiveUrl}
+              </p>
             </div>
           </InfoCard>
         ) : null}
@@ -242,6 +344,365 @@ export default function MasterGamePage() {
               ))}
             </div>
           )}
+        </section>
+
+        <section className="space-y-3" id="bonus-battle">
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-[#6D3DF5]">
+                TikTok LIVE voorbereid
+              </p>
+              <h2 className="text-2xl font-black text-[#10233F]">Bonus Battle</h2>
+            </div>
+            <StatusBadge tone="yellow">{activeBattle?.phase ?? "Uit"}</StatusBadge>
+          </div>
+
+          <InfoCard>
+            {!activeBattle ? (
+              <div className="space-y-4">
+                <p className="text-sm font-bold leading-6 text-[#667085]">
+                  Laat alle actieve spelers stemmen op twee deelnemers. Nieuwe spelers kunnen blijven aansluiten.
+                </p>
+
+                <div className="grid grid-cols-3 gap-2 rounded-[22px] bg-[#F5F7FB] p-1.5">
+                  {[
+                    ["1 vraag", 1],
+                    ["Best of 3", 3],
+                    ["Best of 5", 5],
+                  ].map(([label, value]) => (
+                    <button
+                      className={`min-h-12 rounded-[18px] text-sm font-black ${
+                        battleTotalQuestions === value ? "bg-[#6D3DF5] text-white shadow-sm" : "text-[#667085]"
+                      }`}
+                      key={value}
+                      onClick={() => setBattleTotalQuestions(value as number)}
+                      type="button"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="grid gap-2">
+                    <span className="text-xs font-black uppercase tracking-[0.14em] text-[#667085]">Goed</span>
+                    <input
+                      className="h-12 rounded-[18px] border-2 border-[#E5EAF2] px-4 font-black outline-none focus:border-[#8C4DFF]"
+                      min={0}
+                      onChange={(event) => setBattlePointsPerCorrect(Number(event.target.value))}
+                      type="number"
+                      value={battlePointsPerCorrect}
+                    />
+                  </label>
+                  <label className="grid gap-2">
+                    <span className="text-xs font-black uppercase tracking-[0.14em] text-[#667085]">Winnaar</span>
+                    <input
+                      className="h-12 rounded-[18px] border-2 border-[#E5EAF2] px-4 font-black outline-none focus:border-[#8C4DFF]"
+                      min={0}
+                      onChange={(event) => setBattleWinnerBonus(Number(event.target.value))}
+                      type="number"
+                      value={battleWinnerBonus}
+                    />
+                  </label>
+                  <label className="grid gap-2">
+                    <span className="text-xs font-black uppercase tracking-[0.14em] text-[#667085]">Verliezer</span>
+                    <input
+                      className="h-12 rounded-[18px] border-2 border-[#E5EAF2] px-4 font-black outline-none focus:border-[#8C4DFF]"
+                      min={0}
+                      onChange={(event) => setBattleLoserPoints(Number(event.target.value))}
+                      type="number"
+                      value={battleLoserPoints}
+                    />
+                  </label>
+                  <label className="grid gap-2">
+                    <span className="text-xs font-black uppercase tracking-[0.14em] text-[#667085]">Antwoordtijd</span>
+                    <input
+                      className="h-12 rounded-[18px] border-2 border-[#E5EAF2] px-4 font-black outline-none focus:border-[#8C4DFF]"
+                      min={5}
+                      onChange={(event) => setBattleAnswerSeconds(Number(event.target.value))}
+                      type="number"
+                      value={battleAnswerSeconds}
+                    />
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="grid gap-2">
+                    <span className="text-xs font-black uppercase tracking-[0.14em] text-[#667085]">Stemmen</span>
+                    <input
+                      className="h-12 rounded-[18px] border-2 border-[#E5EAF2] px-4 font-black outline-none focus:border-[#8C4DFF]"
+                      min={5}
+                      onChange={(event) => setBattleVotingSeconds(Number(event.target.value))}
+                      type="number"
+                      value={battleVotingSeconds}
+                    />
+                  </label>
+                  <label className="grid gap-2">
+                    <span className="text-xs font-black uppercase tracking-[0.14em] text-[#667085]">Nakijken</span>
+                    <select
+                      className="h-12 rounded-[18px] border-2 border-[#E5EAF2] bg-white px-3 font-black outline-none focus:border-[#8C4DFF]"
+                      onChange={(event) => setBattleJudgingMode(event.target.value as BattleJudgingMode)}
+                      value={battleJudgingMode}
+                    >
+                      <option value="automatic">Automatisch</option>
+                      <option value="manual">Handmatig</option>
+                    </select>
+                  </label>
+                </div>
+
+                <button
+                  className="flex min-h-14 w-full items-center justify-center gap-3 rounded-[22px] bg-[#20C6C7] px-5 font-black text-[#071426] shadow-[0_16px_34px_rgba(32,198,199,0.25)] disabled:opacity-60"
+                  disabled={busy === "startBattle" || sortedPlayers.length < 2}
+                  onClick={handleStartBattle}
+                  type="button"
+                >
+                  Start Bonus Battle
+                  <Icon name="bolt" />
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <InfoCard className="bg-[#F0EEFF] shadow-none">
+                    <p className="text-xs font-black uppercase tracking-[0.14em] text-[#6D3DF5]">Speler 1</p>
+                    <p className="mt-1 text-lg font-black text-[#10233F]">
+                      {battlePlayers?.playerOne?.name ?? "Nog niet gekozen"}
+                    </p>
+                    <p className="text-sm font-black text-[#667085]">{activeBattle.playerOneWins} wins</p>
+                  </InfoCard>
+                  <InfoCard className="bg-[#E9FBFB] shadow-none">
+                    <p className="text-xs font-black uppercase tracking-[0.14em] text-[#008C8D]">Speler 2</p>
+                    <p className="mt-1 text-lg font-black text-[#10233F]">
+                      {battlePlayers?.playerTwo?.name ?? "Nog niet gekozen"}
+                    </p>
+                    <p className="text-sm font-black text-[#667085]">{activeBattle.playerTwoWins} wins</p>
+                  </InfoCard>
+                </div>
+
+                {activeBattle.phase === "voting" ? (
+                  <div className="space-y-3">
+                    <p className="text-sm font-bold text-[#667085]">
+                      Spelers stemmen nu op wie de 1-vs-1 battle speelt.
+                    </p>
+                    {(battleVotes ?? []).slice(0, 5).map((voteRow) => (
+                      <div
+                        className="flex items-center justify-between rounded-[18px] bg-[#F5F7FB] px-4 py-3"
+                        key={voteRow.playerId}
+                      >
+                        <span className="font-black text-[#10233F]">{voteRow.player?.name ?? "Speler"}</span>
+                        <span className="font-black text-[#6D3DF5]">{voteRow.votes}</span>
+                      </div>
+                    ))}
+                    <button
+                      className="min-h-12 w-full rounded-[18px] bg-[#6D3DF5] px-4 font-black text-white"
+                      onClick={() => runAction("finishBattleVoting", () => finishBattleVoting({ battleId: activeBattle._id }))}
+                      type="button"
+                    >
+                      Stemmen afronden
+                    </button>
+                  </div>
+                ) : null}
+
+                {activeBattle.phase === "confirming_players" ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <select
+                        className="h-12 min-w-0 rounded-[18px] border-2 border-[#E5EAF2] bg-white px-2 font-black outline-none focus:border-[#8C4DFF]"
+                        onChange={(event) => setBattlePlayerOneId(event.target.value)}
+                        value={battlePlayerOneId || activeBattle.playerOneId}
+                      >
+                        {sortedPlayers.map((player) => (
+                          <option key={player._id} value={player._id}>
+                            {player.name}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="h-12 min-w-0 rounded-[18px] border-2 border-[#E5EAF2] bg-white px-2 font-black outline-none focus:border-[#8C4DFF]"
+                        onChange={(event) => setBattlePlayerTwoId(event.target.value)}
+                        value={battlePlayerTwoId || activeBattle.playerTwoId}
+                      >
+                        {sortedPlayers.map((player) => (
+                          <option key={player._id} value={player._id}>
+                            {player.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      className="min-h-12 w-full rounded-[18px] bg-[#10233F] px-4 font-black text-white"
+                      onClick={() =>
+                        runAction("confirmBattlePlayers", () =>
+                          confirmBattlePlayers({
+                            battleId: activeBattle._id,
+                            playerOneId: (battlePlayerOneId || activeBattle.playerOneId) as Id<"players">,
+                            playerTwoId: (battlePlayerTwoId || activeBattle.playerTwoId) as Id<"players">,
+                          }),
+                        )
+                      }
+                      type="button"
+                    >
+                      Deelnemers bevestigen
+                    </button>
+                  </div>
+                ) : null}
+
+                {["countdown", "question_result"].includes(activeBattle.phase) ? (
+                  <form className="space-y-3" onSubmit={handleCreateBattleQuestion}>
+                    <textarea
+                      className="min-h-24 w-full rounded-[22px] border-2 border-[#E5EAF2] px-4 py-4 text-lg font-bold outline-none focus:border-[#8C4DFF]"
+                      onChange={(event) => setBattlePrompt(event.target.value)}
+                      placeholder="Typ de battlevraag..."
+                      value={battlePrompt}
+                    />
+                    <select
+                      className="h-12 w-full rounded-[18px] border-2 border-[#E5EAF2] bg-white px-4 font-black outline-none focus:border-[#8C4DFF]"
+                      onChange={(event) => setBattleQuestionType(event.target.value as BattleQuestionType)}
+                      value={battleQuestionType}
+                    >
+                      <option value="multiple_choice">A/B/C/D</option>
+                      <option value="open">Open vraag</option>
+                      <option value="photo">Foto-vraag</option>
+                    </select>
+                    {battleQuestionType === "multiple_choice" ? (
+                      <div className="grid gap-2">
+                        {[
+                          ["A", battleOptionA, setBattleOptionA],
+                          ["B", battleOptionB, setBattleOptionB],
+                          ["C", battleOptionC, setBattleOptionC],
+                          ["D", battleOptionD, setBattleOptionD],
+                        ].map(([label, value, setter]) => (
+                          <input
+                            className="h-12 rounded-[18px] border-2 border-[#E5EAF2] px-3 font-bold outline-none focus:border-[#8C4DFF]"
+                            key={label as string}
+                            onChange={(event) => (setter as (nextValue: string) => void)(event.target.value)}
+                            placeholder={`Antwoord ${label}`}
+                            value={value as string}
+                          />
+                        ))}
+                        <select
+                          className="h-12 rounded-[18px] border-2 border-[#E5EAF2] bg-white px-4 font-black outline-none focus:border-[#8C4DFF]"
+                          onChange={(event) => setBattleCorrectOption(event.target.value)}
+                          value={battleCorrectOption}
+                        >
+                          <option value="A">A is goed</option>
+                          <option value="B">B is goed</option>
+                          <option value="C">C is goed</option>
+                          <option value="D">D is goed</option>
+                        </select>
+                      </div>
+                    ) : null}
+                    <button
+                      className="min-h-12 w-full rounded-[18px] bg-[#FFC928] px-4 font-black text-[#071426]"
+                      type="submit"
+                    >
+                      Battlevraag live zetten
+                    </button>
+                  </form>
+                ) : null}
+
+                {battleQuestion ? (
+                  <div className="rounded-[20px] bg-[#F5F7FB] p-4">
+                    <p className="text-xs font-black uppercase tracking-[0.14em] text-[#667085]">Live battlevraag</p>
+                    <p className="mt-1 text-lg font-black text-[#10233F]">{battleQuestion.prompt}</p>
+                  </div>
+                ) : null}
+
+                {activeBattle.phase === "question_live" ? (
+                  <button
+                    className="min-h-12 w-full rounded-[18px] bg-[#FFF1F0] px-4 font-black text-[#B42318]"
+                    onClick={() => runAction("closeBattleQuestion", () => closeBattleQuestion({ battleId: activeBattle._id }))}
+                    type="button"
+                  >
+                    Battlevraag sluiten
+                  </button>
+                ) : null}
+
+                {["judging", "question_result", "finished"].includes(activeBattle.phase) ? (
+                  <div className="space-y-3">
+                    {(battleAnswers ?? []).map((battleAnswer) => (
+                      <div className="rounded-[18px] bg-[#F5F7FB] p-3" key={battleAnswer._id}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-black text-[#10233F]">
+                              {battleAnswer.playerId === activeBattle.playerOneId
+                                ? battlePlayers?.playerOne?.name
+                                : battlePlayers?.playerTwo?.name}
+                            </p>
+                            <p className="text-sm font-bold text-[#667085]">
+                              {battleAnswer.answer} · {(battleAnswer.responseTimeMs / 1000).toFixed(2)} sec
+                            </p>
+                          </div>
+                          <StatusBadge tone={battleAnswer.isCorrect ? "yellow" : "blue"}>
+                            {battleAnswer.isCorrect === undefined ? "Open" : battleAnswer.isCorrect ? "Goed" : "Fout"}
+                          </StatusBadge>
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          <button
+                            className="min-h-11 rounded-[16px] bg-[#20C6C7] px-3 text-sm font-black text-[#071426]"
+                            onClick={() =>
+                              runAction(`battle-good-${battleAnswer._id}`, () =>
+                                judgeBattleAnswer({
+                                  answerId: battleAnswer._id,
+                                  isCorrect: true,
+                                  awardedPoints: activeBattle.pointsPerCorrect,
+                                }),
+                              )
+                            }
+                            type="button"
+                          >
+                            Goed
+                          </button>
+                          <button
+                            className="min-h-11 rounded-[16px] bg-white px-3 text-sm font-black text-[#667085]"
+                            onClick={() =>
+                              runAction(`battle-wrong-${battleAnswer._id}`, () =>
+                                judgeBattleAnswer({
+                                  answerId: battleAnswer._id,
+                                  isCorrect: false,
+                                  awardedPoints: 0,
+                                }),
+                              )
+                            }
+                            type="button"
+                          >
+                            Fout
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {activeBattle.phase === "judging" ? (
+                      <button
+                        className="min-h-12 w-full rounded-[18px] bg-[#6D3DF5] px-4 font-black text-white"
+                        onClick={() => runAction("completeBattleQuestion", () => completeBattleQuestion({ battleId: activeBattle._id }))}
+                        type="button"
+                      >
+                        Uitslag van deze vraag
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {activeBattle.phase === "finished" ? (
+                  <button
+                    className="min-h-12 w-full rounded-[18px] bg-[#FFC928] px-4 font-black text-[#071426]"
+                    onClick={() => runAction("awardBattlePoints", () => awardBattlePoints({ battleId: activeBattle._id }))}
+                    type="button"
+                  >
+                    Punten toevoegen aan ranglijst
+                  </button>
+                ) : null}
+
+                <button
+                  className="min-h-11 w-full rounded-[18px] bg-[#FFF1F0] px-4 text-sm font-black text-[#B42318]"
+                  onClick={() => runAction("cancelBattle", () => cancelBattle({ battleId: activeBattle._id }))}
+                  type="button"
+                >
+                  Bonus Battle stoppen
+                </button>
+              </div>
+            )}
+          </InfoCard>
         </section>
 
         <form className="space-y-4" onSubmit={handleCreateQuestion}>
